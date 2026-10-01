@@ -36,16 +36,12 @@ except ImportError:
 # Define paths and directories
 PROJECT   = os.path.abspath(os.path.join(".",""))
 RESOURCES = os.path.join(PROJECT, "resources")
-RESULTS   = os.path.join(PROJECT, "results")
-OUTDIR = RESULTS
-os.makedirs(OUTDIR, exist_ok=True)
+RESULTS   = Path(PROJECT) / "results"
 MODEL_PATHS = {
   "polyaid":       Path("resources/published_models/PolyaID.h5"),
   "polyastrength": Path("resources/published_models/PolyaStrength.h5")
 }
 CODE_DIR = Path("code")
-OUTDIR   = Path("results")
-OUTDIR.mkdir(exist_ok=True, parents=True)
 
 # Helper functions
 def extractsequence(genome, chrom, start, end, strand):
@@ -849,16 +845,21 @@ def cleavage_profile_explanation2(
 #seq = input("Enter your sequence: ").strip().upper()
 parser = argparse.ArgumentParser(description = '---')
 parser.add_argument('-s', '--sequence', type=str, required=True, help="Sequence of interest")
+parser.add_argument('-o', '--outdir', type=Path, default=RESULTS, metavar='DIR', help="Output directory (default: results)")
 arg_prs = parser.parse_args()
 seq = arg_prs.sequence
+OUTDIR = arg_prs.outdir.expanduser()
+OUTDIR.mkdir(exist_ok=True, parents=True)
+print(f"Output directory: {OUTDIR}")
 
 valid_bases = set("ACGTN")
 if not seq or any(base not in valid_bases for base in seq):
-    raise ValueError("Invalid sequence")
+    raise ValueError("Invalid sequence.  Valid bases are {A, C, G, T, N}")
 
 args = "N" * 120 + seq + "N" * 120
 total_length = len(args)
-print(f"Input sequence length: {total_length} nt")
+print(f"Input sequence length (original): {len(seq)} nt")
+print(f"Input sequence length (with spacers): {total_length} nt")
 
 ''' example
 AGAGCCGTGAAGGCCCAGGGGACCTGCGTGTCTTGGCTCCACGCCAGATGTGTTATTATTTATGTCTCTGAGAATGTCTGGATCTCAGAGCCGAATTACAATAAAAACATCTTTAAACTTATTTCTACCTCATTTTGGGGTTGCCAGCTCACCTGATCATTTTTATGAACTGTCATGAACACTGATGACATTTTATGAGCCTTTTACATGGGACACTACAGAATACATTTGTCAGCGAGG
@@ -869,7 +870,9 @@ polyaID = make_polyaid_model("resources/published_models/PolyaID.h5")
 polyaStrength = make_polyastrength_model("resources/published_models/PolyaStrength.h5")
 
 sequence = args
-save_sliding_windows(sequence, 'sliding_windows.txt')
+windows_path = OUTDIR / 'sliding_windows.txt'
+representatives_path = OUTDIR / 'sliding_windows_representatives.txt'
+save_sliding_windows(sequence, windows_path)
 
 sequence = args
 len_sequence = len(sequence)
@@ -893,7 +896,7 @@ for idx, window_seq in enumerate(windows):
 	polyaStrength_score = polyaStrength.predict(encoding, verbose=0)[0][0]
 
 
-df = pd.read_csv("sliding_windows.txt", sep="\t")
+df = pd.read_csv(windows_path, sep="\t")
 
 polyaid_scores = []
 polyaid_normvec_str = []
@@ -929,19 +932,19 @@ df = df.drop(columns=["chrom", "start", "end", "strand"], errors="ignore")
 cols = [c for c in df.columns if c != "Position"]
 df = df[cols + ["Position"]]
 
-df.to_csv("sliding_windows_representatives.txt", sep="\t", index=False)
+df.to_csv(representatives_path, sep="\t", index=False)
 
 
 
 merged_predictions = run_predictions2(
-    Path("sliding_windows.txt"),
+    windows_path,
     OUTDIR,
     CODE_DIR,
     MODEL_PATHS
 )
 
 examples = []
-with open("results/comprehensive_predictions.txt", newline="") as fh:
+with open(OUTDIR / "comprehensive_predictions.txt", newline="") as fh:
     reader = csv.DictReader(fh, delimiter="\t")
     for r in reader:
         r["sequence"]        = r["sequence"].strip().upper()
@@ -995,7 +998,7 @@ plt.show()
 import numpy as np
 import pandas as pd
 
-df2 = pd.read_csv("sliding_windows_representatives.txt", sep="\t")
+df2 = pd.read_csv(representatives_path, sep="\t")
 
 vecs = np.vstack(df2["cleavage_vector"].apply(lambda s: np.fromstring(s, sep=",")))
 classp = df2["PolyaID"].to_numpy(float)
